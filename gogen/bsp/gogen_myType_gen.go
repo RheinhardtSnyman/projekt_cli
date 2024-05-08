@@ -1,16 +1,16 @@
 package main
 
-type intStack struct {
-	stackSlice []int
+type myTypeStack struct {
+	stackSlice []myType
 }
 
-func (s *intStack) Push(in int) {
+func (s *myTypeStack) Push(in myType) {
 	s.stackSlice = append(s.stackSlice, in)
 }
 
-func (s *intStack) Pop() int {
+func (s *myTypeStack) Pop() myType {
 	if len(s.stackSlice) == 0 {
-		var empty int
+		var empty myType
 		return empty
 	}
 	out := s.stackSlice[len(s.stackSlice)-1]
