@@ -28,3 +28,26 @@ func TestParseSize(t *testing.T) {
 		})
 	}
 }
+
+func Test_useFile(t *testing.T) {
+	type args struct {
+		s string
+	}
+	tests := []struct {
+		filename string
+		want     bool
+	}{
+		{"a/b/file.JPG", true},
+		{"a/b/file.jpeg", true},
+		{"a/b/file.jeg", false},
+		{"a/b/file", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.filename, func(t *testing.T) {
+			if got := useFile(tt.filename); got != tt.want {
+				t.Errorf("useFile() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
