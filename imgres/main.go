@@ -33,40 +33,76 @@ func main() {
 	if *flagOutFolder != "" {
 		outFolder = *flagOutFolder
 	}
-	err = os.MkdirAll(outFolder, os.FileMode(0755))
+	err = resizeFolderImages(*flagInFolder, outFolder, size)
 	if err != nil {
-		fmt.Println("cannot create output folder: ", err)
-		os.Exit(2)
+		fmt.Println(err)
+		os.Exit(10)
 	}
-	dir, err := os.ReadDir(*flagInFolder) //TODO update to os.ReadDir
+}
+
+type errorList struct {
+	errs []error
+}
+
+func (e *errorList) add(err error) {
 	if err != nil {
-		fmt.Println("cannot read from source: ", err)
-		os.Exit(3)
+		e.errs = append(e.errs, err)
 	}
+}
+
+func (e *errorList) hasErrors() bool {
+	return len(e.errs) > 0
+}
+
+func (e *errorList) Error() string {
+	if !e.hasErrors() {
+		return ""
+	}
+	out := fmt.Sprintf("number of errors %d\n", len(e.errs))
+	for i, err := range e.errs {
+		out = fmt.Sprintf("%s\n%d: $s", out, i, err.Error())
+	}
+	return out
+}
+
+func resizeFolderImages(inFolder, outFolder string, size picSize) error {
+	err := os.MkdirAll(outFolder, os.FileMode(0755))
+	if err != nil {
+		return fmt.Errorf("cannot create output folder: ", err)
+	}
+	dir, err := os.ReadDir(inFolder)
+	if err != nil {
+		return fmt.Errorf("cannot read from source: ", err)
+	}
+	errList := &errorList{}
 	for _, fi := range dir {
 		if fi.IsDir() || !useFile(fi.Name()) {
 			continue
 		}
-		inPath := filepath.Join(*flagInFolder, fi.Name())
+		inPath := filepath.Join(inFolder, fi.Name())
 		infile, err := os.Open(inPath)
 		if err != nil {
-			fmt.Println("error opening file: ", err)
+			errList.add(fmt.Errorf("error opening file: %w", err))
 			continue
 		}
 		outPath := filepath.Join(outFolder, fi.Name())
 		outFile, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY, 0777)
 		if err != nil {
-			fmt.Println("cannot create file: ", err)
+			errList.add(fmt.Errorf("cannot create file: %w", err))
 			infile.Close()
 			continue
 		}
 		err = resize(size, infile, outFile)
 		if err != nil {
-			fmt.Println("error resizing image: ", err)
+			errList.add(fmt.Errorf("error resizing image: %w", err))
 		}
 		outFile.Close()
 		infile.Close()
 	}
+	if errList.hasErrors() {
+		return errList
+	}
+	return nil
 }
 
 type picSize struct {
