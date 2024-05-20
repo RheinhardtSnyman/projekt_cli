@@ -8,10 +8,12 @@ import (
 	"image"
 	"image/jpeg"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/disintegration/imaging"
 )
@@ -60,7 +62,7 @@ func (e *errorList) Error() string {
 	}
 	out := fmt.Sprintf("number of errors %d\n", len(e.errs))
 	for i, err := range e.errs {
-		out = fmt.Sprintf("%s\n%d: $s", out, i, err.Error())
+		out = fmt.Sprintf("%s\n%d: %s", out, i, err.Error())
 	}
 	return out
 }
@@ -68,37 +70,55 @@ func (e *errorList) Error() string {
 func resizeFolderImages(inFolder, outFolder string, size picSize) error {
 	err := os.MkdirAll(outFolder, os.FileMode(0755))
 	if err != nil {
-		return fmt.Errorf("cannot create output folder: ", err)
+		return fmt.Errorf("cannot create output folder: %v\n", err)
 	}
 	dir, err := os.ReadDir(inFolder)
 	if err != nil {
-		return fmt.Errorf("cannot read from source: ", err)
+		return fmt.Errorf("cannot read from source: %v\n", err)
 	}
+	wg := &sync.WaitGroup{}
 	errList := &errorList{}
+	errChan := make(chan error, 1)
+	resizeChan := make(chan resizeArgs)
+	wg.Add(3)
+	go resizer(wg, resizeChan, errChan)
+	go resizer(wg, resizeChan, errChan)
+	go resizer(wg, resizeChan, errChan)
+
+	go func(errList *errorList, errChan chan error) {
+		for err := range errChan {
+			errList.add(err)
+		}
+	}(errList, errChan)
+
 	for _, fi := range dir {
 		if fi.IsDir() || !useFile(fi.Name()) {
 			continue
 		}
 		inPath := filepath.Join(inFolder, fi.Name())
-		infile, err := os.Open(inPath)
-		if err != nil {
-			errList.add(fmt.Errorf("error opening file: %w", err))
-			continue
-		}
+		// infile, err := os.Open(inPath)
+		// if err != nil {
+		// 	errList.add(fmt.Errorf("error opening file: %w", err))
+		// 	continue
+		// }
 		outPath := filepath.Join(outFolder, fi.Name())
-		outFile, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY, 0777)
-		if err != nil {
-			errList.add(fmt.Errorf("cannot create file: %w", err))
-			infile.Close()
-			continue
-		}
-		err = resize(size, infile, outFile)
-		if err != nil {
-			errList.add(fmt.Errorf("error resizing image: %w", err))
-		}
-		outFile.Close()
-		infile.Close()
+		resizeChan <- resizeArgs{inPath, outPath, size}
+		// outFile, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY, 0777)
+		// if err != nil {
+		// 	errList.add(fmt.Errorf("cannot create file: %w", err))
+		// 	infile.Close()
+		// 	continue
+		// }
+		// err = resize(size, infile, outFile)
+		// if err != nil {
+		// 	errList.add(fmt.Errorf("error resizing image: %w", err))
+		// }
+		// outFile.Close()
+		// infile.Close()
 	}
+	close(resizeChan)
+	close(errChan)
+	wg.Wait()
 	if errList.hasErrors() {
 		return errList
 	}
@@ -125,6 +145,40 @@ func parseSize(s string) (picSize, error) {
 		return ps, fmt.Errorf("parseSize: ps.y: %w", err)
 	}
 	return ps, nil
+}
+
+type resizeArgs struct {
+	inPath  string
+	outPath string
+	size    picSize
+}
+
+func resizer(wg *sync.WaitGroup, c chan resizeArgs, errChan chan error) {
+	for a := range c {
+		log.Println("resize: ", a.inPath)
+		inFile, err := os.Open(a.inPath)
+		if err != nil {
+			errChan <- fmt.Errorf("error when open file: %w", err)
+			continue
+		}
+		outFile, err := os.OpenFile(a.outPath, os.O_CREATE|os.O_WRONLY, 0777)
+		if err != nil {
+			errChan <- err
+			inFile.Close()
+			continue
+		}
+		err = resizeClose(a.size, inFile, outFile)
+		if err != nil {
+			errChan <- err
+		}
+	}
+	wg.Done()
+}
+
+func resizeClose(ps picSize, r io.ReadCloser, w io.WriteCloser) error {
+	defer r.Close()
+	defer w.Close()
+	return resize(ps, r, w)
 }
 
 func resize(ps picSize, r io.Reader, w io.Writer) error {
