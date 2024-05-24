@@ -2,4 +2,6 @@
 <a href="/">Home</a>
 <h1>{{ .Title }}</h1>
 {{ .Content }}
+<hr />
+{{ template "comment" . }}
 {{ end }}
